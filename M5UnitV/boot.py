@@ -7,14 +7,12 @@ from Maix import GPIO
 from pmu import axp192
 from machine import UART,I2C
 import ulab as np
+from modules import ws2812
 
-
-#Feature Vector Update
 def update(capture,new_data,weight):
     new_data= new_data*weight+capture*(1.0-weight)
     return new_data
 
-#Feature Vector Compare
 def get_dis(new_data,master_data):
     dist = np.sum((new_data-master_data)*(new_data-master_data))
     return dist
@@ -46,6 +44,11 @@ print("Initialize")
 uniV_use=unitv_check()
 m5stickv_init(uniV_use)
 
+if uniV_use==1:
+    class_ws2812 = ws2812(8,1)
+    class_ws2812.set_led(0,(0,0,0))
+    class_ws2812.display()
+
 print("M5 Button def")
 but_a_pressed = 0
 but_b_pressed = 0
@@ -61,13 +64,13 @@ but_a = GPIO(GPIO.GPIO1, GPIO.IN, GPIO.PULL_UP)
 but_b = GPIO(GPIO.GPIO2, GPIO.IN, GPIO.PULL_UP)
 
 
-# UART Connection
+#UART Connection
 fm.register(35, fm.fpioa.UART2_TX, force=True)
 fm.register(34, fm.fpioa.UART2_RX, force=True)
 uart_Port = UART(UART.UART2, 115200,8,0,0, timeout=1000, read_buf_len= 4096)
 
 task = kpu.load(0x200000)
-print(kpu.memtest())
+#task = kpu.load("mobilenet_05.kmodel")
 set=kpu.set_layers(task,29)
 
 w_data=0.99
@@ -82,13 +85,17 @@ img = sensor.snapshot()
 fmap = kpu.forward(task, img)
 new_data = np.array(fmap[:])
 master_data = new_data
-img_buf = image.Image()
 
 dist_old=0.0
-dist_thresh=100
+img_buf = image.Image()
+
 data_packet = bytearray([0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00])
 
+dist_thresh=100
+
 while(True):
+    #print(kpu.memtest())
+
     img = sensor.snapshot()
     fmap = kpu.forward(task, img)
     capture = np.array(fmap[:])
@@ -101,6 +108,10 @@ while(True):
             kpu_dat[16*row+col] = int(new_data[row*16+col]*100)
 
     if dist > dist_thresh:
+        if uniV_use==1:
+            class_ws2812.set_led(0,(1,0,0))
+            class_ws2812.display()
+
         if dist_old <= dist_thresh:
             img_buf = img.copy()
             img_buf.compress(quality=70)
@@ -111,10 +122,14 @@ while(True):
             uart_Port.write(data_packet)
             uart_Port.write(img_buf)
             time.sleep(1.0)
-            #print("image send",data_packet)
+            print("image send,data_packet")
         img.draw_rectangle(0,0,220,220,color = (255, 0, 0),thickness=10)
+    else:
+        if uniV_use==1:
+            class_ws2812.set_led(0,(0,1,0))
+            class_ws2812.display()
 
-    dist_out=int(dist)
+    dist_out = int(dist)
     dist_1 = (dist_out& 0x00FF00)>>8
     dist_2 = (dist_out& 0x0000FF)>>0
     dist_th1 = (dist_thresh& 0x00FF00)>>8
@@ -122,7 +137,7 @@ while(True):
 
     data_packet = bytearray([0xFF,0xF3,0xF4,0xA1,dist_1,dist_2,dist_th1,dist_th2,0x00,0x00])
     uart_Port.write(data_packet)
-    #print(dist_out,data_packet)
+    print("send",dist_out,"buf",data_packet)
     if dist <= dist_thresh:
         img.draw_rectangle(0,0,220,220,color = (0, 0, 255),thickness=10)
 
